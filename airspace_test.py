@@ -10,6 +10,10 @@ import pandas as pd
 
 # {'C', 'CTR', 'D', 'GP', 'P', 'Q', 'R', 'RMZ', 'W'}
 
+def get_geojson(url):
+    r = requests.get(url)
+    return json.loads(r.text)
+
 def get_openair_AC(feature):
     
     if 'CTR' in feature['name']:
@@ -116,6 +120,8 @@ def features_properties_coordinates_combine(features):
     df = df[~df.openair_AC.isnull()]
 
     return df
+
+
 def df_to_openair(df):
     s = ""
     
@@ -123,18 +129,96 @@ def df_to_openair(df):
         s += feature_to_openair(row) + '\n'
     
     return s
+
+def fir_to_series(fir_json):
+    coordinates = fir_json['features'][0]['geometry']['coordinates'][0][0]
+    
+    row = pd.Series({'name': 'FIR',
+                     'openair_AC': 'C',
+                     'freq': '',
+                     'upper': 'FL 660',
+                     'lower': 'FL 95', 
+                     'callsign': '',
+                     'airspaceclass': 'C',
+                     'coordinates': coordinates})
+    
+    return row
+
+def get_gliding_area_freq(area_name, aerodromes_json):
+    
+    area_name = area_name.split()[-1]
+    
+    if area_name == 'PAHKAJÄRVI':
+        search_name = 'selänpää'
+    elif area_name == 'VESIVEHMAA':
+        search_name = 'lahti-vesivehmaa'
+    else:
+        search_name = area_name.lower()
+    
+    ad_names = [af['properties']['name'].lower() for af in aerodromes_json['features']]
+    
+    ad_inds = [ind for ind, name in enumerate(ad_names) if search_name in name]
+    
+    if not ad_inds:
+        return ''
+    
+    return aerodromes_json['features'][ad_inds[0]]['properties']['comFreq']
+
+def append_gliding_freqs(df, aerodromes_json):
+    for ind, row in df.iterrows():
+        if row.openair_AC == 'W':
+            freq = get_gliding_area_freq(row['name'], aerodromes_json)
+            df.loc[ind, 'freq'] = freq
+    return df
     
 
-r = requests.get(r'https://aviamaps.com/api/airspaces.geojson')
+def gliding_areas(df, aerodromes):
+    for ind, row in df[df.openair_AC == 'W'].iterrows():
+        # print(row['name'])
+        pass
+    
+    D_names = list(df[df.openair_AC == 'W']['name'].str.split().apply(lambda x: x[-1]).unique())
+    
+    aerodrome_names = [af['properties']['name'].split()[-1] for af in aerodromes['features']]
+    
+    for dn in D_names:
+        print(dn, get_gliding_area_freq(dn, aerodromes))
+        
+        
+        # try:
+            # print(dn, '-', aerodrome_names_lower.index(dn.lower()))
+        # except:
+            # print(dn, '-')
+        
+    print()
+    
+    # for an in aerodrome_names:
+        # print(an.lower())
+    
+    # for aerodrome_feature in aerodromes['features']:
+        # print(aerodrome_feature['properties']['name'])
 
-s = r.text
-j = json.loads(s)
+airspaces_json = get_geojson('https://aviamaps.com/api/airspaces.geojson')
+fir_json = get_geojson('https://aviamaps.com/api/finland.geojson')
+aerodromes_json = get_geojson('https://aviamaps.com/api/aerodromes.geojson')
 
-df = features_properties_coordinates_combine(j['features'])
 
-s = df_to_openair(df[df.openair_AC.isin(['W'])])
+df = features_properties_coordinates_combine(airspaces_json['features'])
+df = df.append(fir_to_series(fir_json), ignore_index=True)
+
+df = append_gliding_freqs(df, aerodromes_json)
+
+# openair_string = df_to_openair(df[df.openair_AC.isin(['W'])])
+openair_string = df_to_openair(df)
+
+
+
+
+# gliding_areas(df, aerodromes_json)
+
+
 
 from pathlib import Path
-Path(r'C:\Users\vostok\Documents\XCSoarData\openair.txt').write_text(s)
+Path(r'C:\Users\vostok\Documents\XCSoarData\openair.txt').write_text(openair_string)
 
 # old_openair = requests.get('http://vostok.kapsi.fi/xcsoar/PIK_ilmatila_2018-05-24.txt').text
